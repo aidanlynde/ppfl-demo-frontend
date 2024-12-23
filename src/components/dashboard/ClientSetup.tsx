@@ -1,5 +1,3 @@
-// File: src/components/dashboard/ClientSetup.tsx
-
 "use client";
 
 import React, { useState } from 'react';
@@ -9,6 +7,7 @@ import { Plus, Minus, Play } from 'lucide-react';
 
 interface ClientSetupProps {
   onStart: () => void;
+  sessionId: string | null;
 }
 
 interface Client {
@@ -17,10 +16,12 @@ interface Client {
   dataDistribution: string;
 }
 
-const ClientSetup: React.FC<ClientSetupProps> = ({ onStart }) => {
+const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
   const [clients, setClients] = useState<Client[]>([
     { id: 1, dataSize: 1000, dataDistribution: 'normal' }
   ]);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   const addClient = (): void => {
     if (clients.length < 5) {
@@ -39,31 +40,61 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart }) => {
   };
 
   const handleStart = async (): Promise<void> => {
+    if (!sessionId) {
+      setError('No active session');
+      return;
+    }
+
+    setError(null);
+    setIsLoading(true);
+
     try {
+      console.log('Sending initialize request with session:', sessionId);
+      
+      const initializeData = {
+        num_clients: clients.length,
+        local_epochs: 1,
+        batch_size: 32,
+        noise_multiplier: 1.0,
+        l2_norm_clip: 1.0
+      };
+
+      console.log('Request data:', initializeData);
+
       const response = await fetch('/api/fl/initialize', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-Session-ID': sessionId
         },
-        body: JSON.stringify({
-          clients: clients.map(client => ({
-            client_id: client.id,
-            data_size: client.dataSize,
-            distribution: client.dataDistribution
-          }))
-        })
+        body: JSON.stringify(initializeData)
       });
 
-      if (response.ok) {
-        onStart();
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Server response:', errorText);
+        throw new Error(errorText || 'Failed to initialize training');
       }
+
+      const result = await response.json();
+      console.log('Initialize success:', result);
+      onStart();
     } catch (error) {
-      console.error('Error initializing training:', error);
+      console.error('Error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to initialize training');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
     <div className="max-w-4xl mx-auto p-6">
+      {error && (
+        <div className="mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400">
+          {error}
+        </div>
+      )}
+
       <Card className="bg-gray-800 border-purple-500/20">
         <CardHeader>
           <CardTitle className="text-purple-400">Configure Your Clients</CardTitle>
@@ -117,10 +148,13 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart }) => {
 
               <button
                 onClick={handleStart}
-                className="flex items-center space-x-2 px-6 py-2 rounded bg-purple-500 hover:bg-purple-400"
+                disabled={isLoading || !sessionId}
+                className={`flex items-center space-x-2 px-6 py-2 rounded bg-purple-500 hover:bg-purple-400 ${
+                  (isLoading || !sessionId) ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
               >
                 <Play className="w-5 h-5" />
-                <span>Start Training</span>
+                <span>{isLoading ? 'Starting...' : 'Start Training'}</span>
               </button>
             </div>
           </div>
