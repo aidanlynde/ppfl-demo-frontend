@@ -1,4 +1,7 @@
 // File: src/components/dashboard/Dashboard.tsx
+
+"use client";
+
 import React, { useState, useEffect } from 'react';
 import TutorialOverlay from '@/components/dashboard/TutorialOverlay';
 import ClientSetup from '@/components/dashboard/ClientSetup';
