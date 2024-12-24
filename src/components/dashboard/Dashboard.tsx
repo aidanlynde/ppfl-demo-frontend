@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import TutorialOverlay from '@/components/dashboard/TutorialOverlay';
 import ClientSetup from '@/components/dashboard/ClientSetup';
 import ProgressBar from '@/components/dashboard/ProgressBar';
@@ -54,10 +54,16 @@ interface CurrentState {
     l2_norm_clip: number;
   };
   training_active: boolean;
-  latest_accuracy: number;
+  latest_accuracy: number | null;
+}
+
+interface RoundState {
+  isProcessing: boolean;
+  lastCompletedRound: number;
 }
 
 const Dashboard: React.FC = () => {
+  // State declarations
   const [showTutorial, setShowTutorial] = useState<boolean>(true);
   const [showSetup, setShowSetup] = useState<boolean>(false);
   const [isTraining, setIsTraining] = useState<boolean>(false);
@@ -66,146 +72,225 @@ const Dashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
 
-  // Session initialization
-  useEffect(() => {
-    const initializeSession = async () => {
-      try {
-        const id = await SessionStore.initSession();
-        setSessionId(id);
-      } catch (error) {
-        console.error('Failed to initialize session:', error);
-        setError('Failed to initialize session');
-      }
-    };
+  // Use refs for controlling async operations and intervals
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const metricsIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const trainingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isTrainingRoundActiveRef = useRef<boolean>(false);
+  const sessionRenewalTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Initialize or renew session
+  const initializeSession = async (renewExisting: boolean = false) => {
+    try {
+      if (renewExisting && sessionId) {
+        // Check if existing session is still valid
+        const response = await fetch(`/api/session/${sessionId}/status`);
+        if (response.ok) {
+          const { valid } = await response.json();
+          if (valid) return;
+        }
+      }
+
+      // Create new session
+      const response = await fetch('/api/session/new', { method: 'POST' });
+      if (!response.ok) throw new Error('Failed to create session');
+      
+      const { session_id } = await response.json();
+      setSessionId(session_id);
+      setError(null);
+
+      // Schedule session renewal before timeout
+      if (sessionRenewalTimeoutRef.current) {
+        clearTimeout(sessionRenewalTimeoutRef.current);
+      }
+      sessionRenewalTimeoutRef.current = setTimeout(() => {
+        initializeSession(true);
+      }, 25 * 60 * 1000); // Renew 5 minutes before 30-minute timeout
+      
+    } catch (err) {
+      console.error('Session initialization failed:', err);
+      setError('Failed to initialize session. Please refresh the page.');
+      setIsTraining(false);
+    }
+  };
+
+  // Fetch current metrics and state
+  const fetchData = async (): Promise<boolean> => {
+    if (!sessionId || !isTraining) return false;
+
+    try {
+      const [metricsResponse, stateResponse] = await Promise.all([
+        fetch('/api/fl/metrics', {
+          headers: { 'X-Session-ID': sessionId }
+        }),
+        fetch('/api/fl/current_state', {
+          headers: { 'X-Session-ID': sessionId }
+        })
+      ]);
+
+      // Handle session expiry
+      if (metricsResponse.status === 401 || stateResponse.status === 401) {
+        await initializeSession(true);
+        return false;
+      }
+
+      if (!metricsResponse.ok || !stateResponse.ok) {
+        throw new Error(`Failed to fetch data: ${metricsResponse.status}, ${stateResponse.status}`);
+      }
+
+      const [metricsData, stateData] = await Promise.all([
+        metricsResponse.json(),
+        stateResponse.json()
+      ]);
+
+      setMetrics(metricsData);
+      setCurrentState(stateData);
+      setError(null);
+
+      // Check if training should stop
+      if (stateData.current_round >= stateData.total_rounds || !stateData.training_active) {
+        setIsTraining(false);
+      }
+
+      return true;
+    } catch (err) {
+      console.error('Error fetching data:', err);
+      if (err instanceof Error) setError(err.message);
+      return false;
+    }
+  };
+
+  // Execute training round
+  const trainRound = async (): Promise<void> => {
+    if (!sessionId || isTrainingRoundActiveRef.current || !isTraining) return;
+
+    try {
+      isTrainingRoundActiveRef.current = true;
+      
+      const response = await fetch('/api/fl/train_round', {
+        method: 'POST',
+        headers: {
+          'X-Session-ID': sessionId,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      // Handle session expiry
+      if (response.status === 401) {
+        await initializeSession(true);
+        return;
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Training round failed: ${errorText}`);
+      }
+
+      const result = await response.json();
+      
+      if (result.status === 'success') {
+        // Wait for backend state to update
+        let retries = 3;
+        while (retries > 0) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const success = await fetchData();
+          if (success) break;
+          retries--;
+        }
+      }
+    } catch (err) {
+      console.error('Error in training round:', err);
+      if (err instanceof Error) setError(err.message);
+      setIsTraining(false);
+    } finally {
+      isTrainingRoundActiveRef.current = false;
+    }
+  };
+
+  // Initialize session effect
+  useEffect(() => {
     if (!sessionId) {
       initializeSession();
     }
+
+    return () => {
+      if (sessionRenewalTimeoutRef.current) {
+        clearTimeout(sessionRenewalTimeoutRef.current);
+      }
+    };
   }, [sessionId]);
 
-  // Fetch metrics and state
+  // Training management effect
   useEffect(() => {
-    if (isTraining && sessionId) {
-      const fetchData = async () => {
-        try {
-          const [metricsResponse, stateResponse] = await Promise.all([
-            fetch('/api/fl/metrics', { 
-              headers: { 'X-Session-ID': sessionId }
-            }),
-            fetch('/api/fl/current_state', { 
-              headers: { 'X-Session-ID': sessionId }
-            })
-          ]);
+    if (!isTraining || !sessionId) return;
 
-          if (!metricsResponse.ok || !stateResponse.ok) {
-            throw new Error('Failed to fetch data');
-          }
+    const scheduleNextRound = () => {
+      if (trainingTimeoutRef.current) {
+        clearTimeout(trainingTimeoutRef.current);
+      }
 
-          const metricsData = await metricsResponse.json();
-          const stateData = await stateResponse.json();
-
-          console.log('Metrics data:', metricsData);
-          console.log('State data:', stateData);
-
-          setMetrics(metricsData);
-          setCurrentState(stateData);
-          setError(null);
-        } catch (error) {
-          console.error('Error fetching data:', error);
-          setError(error instanceof Error ? error.message : 'Failed to fetch data');
+      trainingTimeoutRef.current = setTimeout(() => {
+        if (isTraining && !isTrainingRoundActiveRef.current) {
+          trainRound().then(() => {
+            if (isTraining) scheduleNextRound();
+          });
         }
-      };
+      }, 30000); // 30 seconds between rounds
+    };
 
-      fetchData();
-      const fetchInterval = setInterval(fetchData, 5000);
-      return () => clearInterval(fetchInterval);
-    }
+    // Start first round and schedule next
+    trainRound().then(() => {
+      if (isTraining) scheduleNextRound();
+    });
+
+    return () => {
+      if (trainingTimeoutRef.current) {
+        clearTimeout(trainingTimeoutRef.current);
+      }
+      isTrainingRoundActiveRef.current = false;
+    };
   }, [isTraining, sessionId]);
 
-  // Training rounds
+  // Metrics polling effect
   useEffect(() => {
-    if (isTraining && sessionId) {
-      let isTrainingRound = false;
-      let retryCount = 0;
-      const MAX_RETRIES = 3;
-      const RETRY_DELAY = 2000;
+    if (!isTraining || !sessionId) return;
 
-      const trainRound = async () => {
-        // Skip if already training or training is complete
-        if (isTrainingRound || (currentState?.current_round || 0) >= (currentState?.total_rounds || 10)) {
-          return;
-        }
+    const pollMetrics = () => {
+      if (metricsIntervalRef.current) {
+        clearInterval(metricsIntervalRef.current);
+      }
 
-        try {
-          isTrainingRound = true;
-          console.log('Starting training round...');
-          
-          const response = await fetch('/api/fl/train_round', {
-            method: 'POST',
-            headers: {
-              'X-Session-ID': sessionId
-            }
-          });
+      fetchData();
+      metricsIntervalRef.current = setInterval(fetchData, 10000);
+    };
 
-          if (!response.ok) {
-            throw new Error(`Failed to train round: ${response.status}`);
-          }
+    pollMetrics();
 
-          const result = await response.json();
-          console.log('Training round result:', result);
-          retryCount = 0; // Reset retry count on success
+    return () => {
+      if (metricsIntervalRef.current) {
+        clearInterval(metricsIntervalRef.current);
+      }
+    };
+  }, [isTraining, sessionId]);
 
-          // Fetch updated state after successful training round
-          const [metricsResponse, stateResponse] = await Promise.all([
-            fetch('/api/fl/metrics', { headers: { 'X-Session-ID': sessionId }}),
-            fetch('/api/fl/current_state', { headers: { 'X-Session-ID': sessionId }})
-          ]);
+  // Component cleanup
+  useEffect(() => {
+    return () => {
+      if (metricsIntervalRef.current) clearInterval(metricsIntervalRef.current);
+      if (trainingTimeoutRef.current) clearTimeout(trainingTimeoutRef.current);
+      if (sessionRenewalTimeoutRef.current) clearTimeout(sessionRenewalTimeoutRef.current);
+      if (abortControllerRef.current) abortControllerRef.current.abort();
+      isTrainingRoundActiveRef.current = false;
+    };
+  }, []);
 
-          if (!metricsResponse.ok || !stateResponse.ok) {
-            throw new Error('Failed to fetch updated data');
-          }
-
-          const metricsData = await metricsResponse.json();
-          const stateData = await stateResponse.json();
-          
-          setMetrics(metricsData);
-          setCurrentState(stateData);
-          setError(null);
-
-        } catch (error) {
-          console.error('Error during training round:', error);
-          retryCount++;
-          
-          if (retryCount >= MAX_RETRIES) {
-            setError(`Training failed after ${MAX_RETRIES} attempts. Please try again.`);
-            setIsTraining(false);
-            return;
-          }
-          
-          // Add exponential backoff for retries
-          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * Math.pow(2, retryCount)));
-        } finally {
-          isTrainingRound = false;
-        }
-      };
-
-      const trainingInterval = setInterval(trainRound, 10000); // 10 seconds between rounds
-      trainRound(); // Run first round immediately
-
-      return () => {
-        clearInterval(trainingInterval);
-        isTrainingRound = false;
-      };
-    }
-  }, [isTraining, sessionId, currentState?.current_round, currentState?.total_rounds]);
-
-  const handleTutorialComplete = (): void => {
+  // Event handlers
+  const handleTutorialComplete = () => {
     setShowTutorial(false);
     setShowSetup(true);
   };
 
-  const handleSetupComplete = (): void => {
-    console.log('Setup complete, starting training...');
+  const handleSetupComplete = () => {
     setShowSetup(false);
     setIsTraining(true);
   };
@@ -226,26 +311,24 @@ const Dashboard: React.FC = () => {
     }));
   };
 
-  // Rest of the JSX remains exactly the same...
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 p-6">
       <div className="max-w-7xl mx-auto">
         <h1 className="text-3xl font-bold mb-8 text-purple-400">Federated Learning Dashboard</h1>
 
-                {/* Add this right after the title */}
         <div className="mb-8">
-        <TrainingStatus 
+          <TrainingStatus 
             status={currentState?.status || 'Initializing'}
             error={error}
             currentRound={currentState?.current_round || 0}
             totalRounds={currentState?.total_rounds || 10}
             accuracy={currentState?.latest_accuracy || 0}
-        />
-        <ProgressBar 
+          />
+          <ProgressBar 
             currentRound={currentState?.current_round || 0}
             totalRounds={currentState?.total_rounds || 10}
             status={currentState?.status || 'Initializing'}
-        />
+          />
         </div>
                 
         {error && (

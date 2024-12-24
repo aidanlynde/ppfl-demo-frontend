@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Slider } from '@/components/ui/slider';
 import { Plus, Minus, Play } from 'lucide-react';
@@ -22,28 +22,29 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
   ]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [initializationAttempts, setInitializationAttempts] = useState(0);
 
-  const addClient = (): void => {
+  const addClient = useCallback((): void => {
     if (clients.length < 5) {
       const totalDataSize = clients.reduce((sum, client) => sum + client.dataSize, 0) + 1000;
       if (totalDataSize > 6000) {
         setError('Warning: Adding more clients would exceed recommended total data size');
         return;
       }
-      setClients([...clients, {
-        id: clients.length + 1,
+      setClients(prev => [...prev, {
+        id: prev.length + 1,
         dataSize: 1000,
         dataDistribution: 'normal'
       }]);
     }
-  };
+  }, [clients]);
 
-  const removeClient = (id: number): void => {
+  const removeClient = useCallback((id: number): void => {
     if (clients.length > 1) {
-      setClients(clients.filter(client => client.id !== id));
+      setClients(prev => prev.filter(client => client.id !== id));
       setError(null);
     }
-  };
+  }, [clients.length]);
 
   const handleStart = async (): Promise<void> => {
     if (!sessionId) {
@@ -82,18 +83,40 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
         body: JSON.stringify(initializeData)
       });
 
+      let errorMessage = '';
+
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Server response:', errorText);
-        throw new Error(errorText || 'Failed to initialize training');
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const errorData = await response.json();
+          errorMessage = errorData.error || 'Failed to initialize training';
+        } else {
+          errorMessage = await response.text() || 'Failed to initialize training';
+        }
+        throw new Error(errorMessage);
       }
 
       const result = await response.json();
       console.log('Initialize success:', result);
-      onStart();
+      
+      if (result.status === 'success') {
+        onStart();
+      } else {
+        throw new Error(result.error || 'Initialization failed');
+      }
     } catch (error) {
       console.error('Error:', error);
-      setError(error instanceof Error ? error.message : 'Failed to initialize training');
+      
+      // Increment attempt counter and handle retries
+      setInitializationAttempts(prev => {
+        const newCount = prev + 1;
+        if (newCount >= 3) {
+          setError('Failed to initialize after multiple attempts. Please refresh and try again.');
+        } else {
+          setError(error instanceof Error ? error.message : 'Failed to initialize training');
+        }
+        return newCount;
+      });
     } finally {
       setIsLoading(false);
     }
@@ -122,6 +145,7 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
                   <button
                     onClick={() => removeClient(client.id)}
                     className="text-gray-400 hover:text-red-400"
+                    disabled={isLoading}
                   >
                     <Minus className="w-5 h-5" />
                   </button>
@@ -133,9 +157,10 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
                     <Slider
                       value={[client.dataSize]}
                       min={100}
-                      max={2000} // Reduced from 5000
+                      max={2000}
                       step={100}
                       className="mt-2"
+                      disabled={isLoading}
                       onValueChange={(value) => {
                         const updatedClients = clients.map(c => 
                           c.id === client.id ? { ...c, dataSize: value[0] } : c
@@ -169,7 +194,7 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
             <div className="flex justify-between mt-6">
               <button
                 onClick={addClient}
-                disabled={clients.length >= 5}
+                disabled={clients.length >= 5 || isLoading}
                 className="flex items-center space-x-2 px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50"
               >
                 <Plus className="w-5 h-5" />
@@ -178,13 +203,15 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
 
               <button
                 onClick={handleStart}
-                disabled={isLoading || !sessionId}
+                disabled={isLoading || !sessionId || initializationAttempts >= 3}
                 className={`flex items-center space-x-2 px-6 py-2 rounded bg-purple-500 hover:bg-purple-400 ${
-                  (isLoading || !sessionId) ? 'opacity-50 cursor-not-allowed' : ''
+                  (isLoading || !sessionId || initializationAttempts >= 3) ? 'opacity-50 cursor-not-allowed' : ''
                 }`}
               >
                 <Play className="w-5 h-5" />
-                <span>{isLoading ? 'Starting...' : 'Start Training'}</span>
+                <span>
+                  {isLoading ? 'Starting...' : 'Start Training'}
+                </span>
               </button>
             </div>
           </div>

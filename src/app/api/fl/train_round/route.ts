@@ -1,6 +1,8 @@
 // src/app/api/fl/train_round/route.ts
 import { NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: Request) {
   try {
     const sessionId = request.headers.get('x-session-id');
@@ -14,14 +16,17 @@ export async function POST(request: Request) {
     const response = await fetch(`${process.env.NEXT_PUBLIC_FL_API_URL}/api/fl/train_round`, {
       method: 'POST',
       headers: {
-        'X-Session-ID': sessionId
+        'X-Session-ID': sessionId,
+        'Content-Type': 'application/json'
       }
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Training round error:', errorText);
-      throw new Error('Failed to train round');
+      return NextResponse.json(
+        { error: errorText || 'Failed to train round' },
+        { status: response.status }
+      );
     }
 
     const data = await response.json();
