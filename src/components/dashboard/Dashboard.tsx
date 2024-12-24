@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import TutorialOverlay from '@/components/dashboard/TutorialOverlay';
 import ClientSetup from '@/components/dashboard/ClientSetup';
+import ProgressBar from '@/components/dashboard/ProgressBar';
+import TrainingStatus from '@/components/dashboard/TrainingStatus';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Activity, Users, Brain, Shield } from 'lucide-react';
@@ -64,6 +66,7 @@ const Dashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
 
+  // Session initialization
   useEffect(() => {
     const initializeSession = async () => {
       try {
@@ -80,43 +83,121 @@ const Dashboard: React.FC = () => {
     }
   }, [sessionId]);
 
+  // Fetch metrics and state
   useEffect(() => {
-  if (isTraining && sessionId) {
-    const fetchData = async (): Promise<void> => {
-      try {
-        const headers = {
-          'X-Session-ID': sessionId
-        };
+    if (isTraining && sessionId) {
+      const fetchData = async () => {
+        try {
+          const [metricsResponse, stateResponse] = await Promise.all([
+            fetch('/api/fl/metrics', { 
+              headers: { 'X-Session-ID': sessionId }
+            }),
+            fetch('/api/fl/current_state', { 
+              headers: { 'X-Session-ID': sessionId }
+            })
+          ]);
 
-        const [metricsResponse, stateResponse] = await Promise.all([
-          fetch('/api/fl/metrics', { headers }),
-          fetch('/api/fl/current_state', { headers })
-        ]);
+          if (!metricsResponse.ok || !stateResponse.ok) {
+            throw new Error('Failed to fetch data');
+          }
 
-        if (!metricsResponse.ok || !stateResponse.ok) {
-          throw new Error('Failed to fetch data');
+          const metricsData = await metricsResponse.json();
+          const stateData = await stateResponse.json();
+
+          console.log('Metrics data:', metricsData);
+          console.log('State data:', stateData);
+
+          setMetrics(metricsData);
+          setCurrentState(stateData);
+          setError(null);
+        } catch (error) {
+          console.error('Error fetching data:', error);
+          setError(error instanceof Error ? error.message : 'Failed to fetch data');
+        }
+      };
+
+      fetchData();
+      const fetchInterval = setInterval(fetchData, 5000);
+      return () => clearInterval(fetchInterval);
+    }
+  }, [isTraining, sessionId]);
+
+  // Training rounds
+  useEffect(() => {
+    if (isTraining && sessionId) {
+      let isTrainingRound = false;
+      let retryCount = 0;
+      const MAX_RETRIES = 3;
+      const RETRY_DELAY = 2000;
+
+      const trainRound = async () => {
+        // Skip if already training or training is complete
+        if (isTrainingRound || (currentState?.current_round || 0) >= (currentState?.total_rounds || 10)) {
+          return;
         }
 
-        const metricsData = await metricsResponse.json();
-        const stateData = await stateResponse.json();
+        try {
+          isTrainingRound = true;
+          console.log('Starting training round...');
+          
+          const response = await fetch('/api/fl/train_round', {
+            method: 'POST',
+            headers: {
+              'X-Session-ID': sessionId
+            }
+          });
 
-        console.log('Metrics data:', metricsData);
-        console.log('State data:', stateData);
+          if (!response.ok) {
+            throw new Error(`Failed to train round: ${response.status}`);
+          }
 
-        setMetrics(metricsData);
-        setCurrentState(stateData);
-        setError(null);
-      } catch (error) {
-        console.error('Error fetching data:', error);
-        setError(error instanceof Error ? error.message : 'Failed to fetch data');
-      }
-    };
+          const result = await response.json();
+          console.log('Training round result:', result);
+          retryCount = 0; // Reset retry count on success
 
-    fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
-  }
-}, [isTraining, sessionId]);
+          // Fetch updated state after successful training round
+          const [metricsResponse, stateResponse] = await Promise.all([
+            fetch('/api/fl/metrics', { headers: { 'X-Session-ID': sessionId }}),
+            fetch('/api/fl/current_state', { headers: { 'X-Session-ID': sessionId }})
+          ]);
+
+          if (!metricsResponse.ok || !stateResponse.ok) {
+            throw new Error('Failed to fetch updated data');
+          }
+
+          const metricsData = await metricsResponse.json();
+          const stateData = await stateResponse.json();
+          
+          setMetrics(metricsData);
+          setCurrentState(stateData);
+          setError(null);
+
+        } catch (error) {
+          console.error('Error during training round:', error);
+          retryCount++;
+          
+          if (retryCount >= MAX_RETRIES) {
+            setError(`Training failed after ${MAX_RETRIES} attempts. Please try again.`);
+            setIsTraining(false);
+            return;
+          }
+          
+          // Add exponential backoff for retries
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * Math.pow(2, retryCount)));
+        } finally {
+          isTrainingRound = false;
+        }
+      };
+
+      const trainingInterval = setInterval(trainRound, 10000); // 10 seconds between rounds
+      trainRound(); // Run first round immediately
+
+      return () => {
+        clearInterval(trainingInterval);
+        isTrainingRound = false;
+      };
+    }
+  }, [isTraining, sessionId, currentState?.current_round, currentState?.total_rounds]);
 
   const handleTutorialComplete = (): void => {
     setShowTutorial(false);
@@ -124,6 +205,7 @@ const Dashboard: React.FC = () => {
   };
 
   const handleSetupComplete = (): void => {
+    console.log('Setup complete, starting training...');
     setShowSetup(false);
     setIsTraining(true);
   };
@@ -144,11 +226,28 @@ const Dashboard: React.FC = () => {
     }));
   };
 
+  // Rest of the JSX remains exactly the same...
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 p-6">
       <div className="max-w-7xl mx-auto">
         <h1 className="text-3xl font-bold mb-8 text-purple-400">Federated Learning Dashboard</h1>
-        
+
+                {/* Add this right after the title */}
+        <div className="mb-8">
+        <TrainingStatus 
+            status={currentState?.status || 'Initializing'}
+            error={error}
+            currentRound={currentState?.current_round || 0}
+            totalRounds={currentState?.total_rounds || 10}
+            accuracy={currentState?.latest_accuracy || 0}
+        />
+        <ProgressBar 
+            currentRound={currentState?.current_round || 0}
+            totalRounds={currentState?.total_rounds || 10}
+            status={currentState?.status || 'Initializing'}
+        />
+        </div>
+                
         {error && (
           <div className="mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400">
             {error}

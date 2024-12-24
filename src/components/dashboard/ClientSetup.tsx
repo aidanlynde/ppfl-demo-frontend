@@ -25,6 +25,11 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
 
   const addClient = (): void => {
     if (clients.length < 5) {
+      const totalDataSize = clients.reduce((sum, client) => sum + client.dataSize, 0) + 1000;
+      if (totalDataSize > 6000) {
+        setError('Warning: Adding more clients would exceed recommended total data size');
+        return;
+      }
       setClients([...clients, {
         id: clients.length + 1,
         dataSize: 1000,
@@ -36,12 +41,19 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
   const removeClient = (id: number): void => {
     if (clients.length > 1) {
       setClients(clients.filter(client => client.id !== id));
+      setError(null);
     }
   };
 
   const handleStart = async (): Promise<void> => {
     if (!sessionId) {
       setError('No active session');
+      return;
+    }
+
+    const totalDataSize = clients.reduce((sum, client) => sum + client.dataSize, 0);
+    if (totalDataSize > 6000) {
+      setError('Total data size too large. Please reduce the number of samples or clients.');
       return;
     }
 
@@ -121,13 +133,22 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
                     <Slider
                       value={[client.dataSize]}
                       min={100}
-                      max={5000}
+                      max={2000} // Reduced from 5000
                       step={100}
                       className="mt-2"
                       onValueChange={(value) => {
-                        setClients(clients.map(c => 
+                        const updatedClients = clients.map(c => 
                           c.id === client.id ? { ...c, dataSize: value[0] } : c
-                        ));
+                        );
+                        const totalDataSize = updatedClients.reduce((sum, c) => sum + c.dataSize, 0);
+                        
+                        if (totalDataSize > 6000) {
+                          setError('Warning: Large total data size may affect performance');
+                        } else {
+                          setError(null);
+                        }
+                        
+                        setClients(updatedClients);
                       }}
                     />
                     <span className="text-sm text-gray-400">{client.dataSize} samples</span>
@@ -135,6 +156,15 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
                 </div>
               </div>
             ))}
+
+            <div className="mt-4 text-sm text-gray-400">
+              Total Data Size: {clients.reduce((sum, client) => sum + client.dataSize, 0)} samples
+              {clients.reduce((sum, client) => sum + client.dataSize, 0) > 4000 && (
+                <span className="text-yellow-400 ml-2">
+                  (High load may affect performance)
+                </span>
+              )}
+            </div>
 
             <div className="flex justify-between mt-6">
               <button

@@ -1,32 +1,35 @@
 // src/app/api/fl/train_round/route.ts
 import { NextResponse } from 'next/server';
-import { API_CONFIG } from '@/config/api';
-import SessionStore from '@/lib/sessionStore';
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    const sessionId = SessionStore.getSessionId();
+    const sessionId = request.headers.get('x-session-id');
     if (!sessionId) {
-      throw new Error('No active session');
+      return NextResponse.json(
+        { error: 'No session ID provided' },
+        { status: 400 }
+      );
     }
 
-    const response = await fetch(`${API_CONFIG.baseUrl}/api/fl/train_round`, {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_FL_API_URL}/api/fl/train_round`, {
       method: 'POST',
       headers: {
-        'X-Session-ID': sessionId,
-      },
+        'X-Session-ID': sessionId
+      }
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      const errorText = await response.text();
+      console.error('Training round error:', errorText);
+      throw new Error('Failed to train round');
     }
 
     const data = await response.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error('Error training round:', error);
+    console.error('Error in train round route:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to train round' },
+      { error: 'Failed to train round' },
       { status: 500 }
     );
   }

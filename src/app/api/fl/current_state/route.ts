@@ -1,19 +1,20 @@
 // src/app/api/fl/current_state/route.ts
 import { NextResponse } from 'next/server';
-import { API_CONFIG } from '@/config/api';
-import SessionStore from '@/lib/sessionStore';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const sessionId = SessionStore.getSessionId();
+    const sessionId = request.headers.get('x-session-id');
     if (!sessionId) {
-      throw new Error('No active session');
+      return NextResponse.json(
+        { error: 'No session ID provided' },
+        { status: 400 }
+      );
     }
 
-    const response = await fetch(`${API_CONFIG.baseUrl}/api/fl/current_state`, {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_FL_API_URL}/api/fl/current_state`, {
       headers: {
-        'X-Session-ID': sessionId,
-      },
+        'X-Session-ID': sessionId
+      }
     });
 
     if (!response.ok) {
@@ -25,7 +26,7 @@ export async function GET() {
   } catch (error) {
     console.error('Error fetching current state:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to fetch current state' },
+      { error: 'Failed to fetch current state' },
       { status: 500 }
     );
   }
