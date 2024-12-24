@@ -82,20 +82,47 @@ const Dashboard: React.FC = () => {
   // Initialize or renew session
   const initializeSession = async (renewExisting: boolean = false) => {
     try {
+      let session_id;
+      
       if (renewExisting && sessionId) {
         // Check if existing session is still valid
         const response = await fetch(`/api/session/${sessionId}/status`);
         if (response.ok) {
           const { valid } = await response.json();
-          if (valid) return;
+          if (valid) {
+            session_id = sessionId;
+          }
         }
       }
-
-      // Create new session
-      const response = await fetch('/api/session/new', { method: 'POST' });
-      if (!response.ok) throw new Error('Failed to create session');
       
-      const { session_id } = await response.json();
+      if (!session_id) {
+        // Create new session
+        const response = await fetch('/api/session/new', { method: 'POST' });
+        if (!response.ok) throw new Error('Failed to create session');
+        const data = await response.json();
+        session_id = data.session_id;
+      }
+      
+      // Initialize FL manager with the session
+      const initResponse = await fetch('/api/fl/initialize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-ID': session_id
+        },
+        body: JSON.stringify({
+          num_clients: 3,
+          local_epochs: 1,
+          batch_size: 32,
+          noise_multiplier: 1,
+          l2_norm_clip: 1
+        })
+      });
+
+      if (!initResponse.ok) {
+        throw new Error('Failed to initialize federated learning');
+      }
+
       setSessionId(session_id);
       setError(null);
 
@@ -107,10 +134,12 @@ const Dashboard: React.FC = () => {
         initializeSession(true);
       }, 25 * 60 * 1000); // Renew 5 minutes before 30-minute timeout
       
+      return session_id;
     } catch (err) {
       console.error('Session initialization failed:', err);
       setError('Failed to initialize session. Please refresh the page.');
       setIsTraining(false);
+      throw err;
     }
   };
 
