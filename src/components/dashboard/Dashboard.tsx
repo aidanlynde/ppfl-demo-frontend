@@ -1,201 +1,111 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
-import TutorialOverlay from '@/components/dashboard/TutorialOverlay';
-import ClientSetup from '@/components/dashboard/ClientSetup';
-import ProgressBar from '@/components/dashboard/ProgressBar';
-import TrainingStatus from '@/components/dashboard/TrainingStatus';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { Activity, Users, Brain, Shield } from 'lucide-react';
-import SessionStore from '@/lib/sessionStore';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import ClientSetup from './ClientSetup';
+import ProgressBar from './ProgressBar';
+import TutorialOverlay from './TutorialOverlay';
+import { AlertCircle, Clock, Activity, Lock, Zap, BarChart } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 interface TrainingMetrics {
-  round_number: number;
-  client_metrics: {
-    [key: string]: {
-      loss: number;
-      accuracy: number;
-    };
-  };
-  global_metrics: {
-    test_loss: number;
-    test_accuracy: number;
-  };
-  privacy_metrics: {
-    noise_scale: number;
-    clip_norm: number;
-    clipped_updates: number;
-    original_update_norms: number[];
-    clipped_update_norms: number[];
-  };
+  loss: number;
+  accuracy: number;
   privacy_budget: {
     epsilon: number;
     delta: number;
-    noise_multiplier: number;
-    l2_norm_clip: number;
   };
 }
 
-interface Metrics {
-  status: string;
-  training_history: {
-    rounds: number[];
-    training_metrics: TrainingMetrics[];
-  };
-}
-
-interface CurrentState {
+interface StateResponse {
   status: string;
   current_round: number;
-  total_rounds: number;
-  privacy_settings: {
-    noise_multiplier: number;
-    l2_norm_clip: number;
-  };
   training_active: boolean;
-  latest_accuracy: number | null;
+  latest_accuracy: number;
 }
 
-interface RoundState {
-  isProcessing: boolean;
-  lastCompletedRound: number;
-}
+// Training step animation component
+const TrainingStep: React.FC<{
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  active: boolean;
+}> = ({ icon, title, description, active }) => (
+  <motion.div
+    className={`p-4 rounded-lg ${active ? 'bg-purple-500/20' : 'bg-gray-700/20'}`}
+    initial={{ opacity: 0, y: 20 }}
+    animate={{ opacity: 1, y: 0 }}
+  >
+    <div className="flex items-center space-x-3 mb-2">
+      <div className={active ? 'text-purple-400' : 'text-gray-400'}>
+        {icon}
+      </div>
+      <h3 className={`font-medium ${active ? 'text-purple-400' : 'text-gray-300'}`}>
+        {title}
+      </h3>
+    </div>
+    <p className="text-sm text-gray-400">
+      {description}
+    </p>
+    {active && (
+      <motion.div
+        className="h-1 bg-purple-500 mt-2 rounded"
+        initial={{ width: 0 }}
+        animate={{ width: '100%' }}
+        transition={{ duration: 1, repeat: Infinity }}
+      />
+    )}
+  </motion.div>
+);
 
 const Dashboard: React.FC = () => {
-  // State declarations
-  const [showTutorial, setShowTutorial] = useState<boolean>(true);
-  const [showSetup, setShowSetup] = useState<boolean>(false);
-  const [isTraining, setIsTraining] = useState<boolean>(false);
-  const [metrics, setMetrics] = useState<Metrics | null>(null);
-  const [currentState, setCurrentState] = useState<CurrentState | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [showTutorial, setShowTutorial] = useState(true);
+  const [trainingStarted, setTrainingStarted] = useState(false);
+  const [currentRound, setCurrentRound] = useState(0);
+  const [totalRounds] = useState(10);
+  const [status, setStatus] = useState('Not started');
+  const [error, setError] = useState<string | null>(null);
+  const [metrics, setMetrics] = useState<TrainingMetrics>({
+    loss: 0,
+    accuracy: 0,
+    privacy_budget: {
+      epsilon: 0,
+      delta: 0
+    }
+  });
+  const [isTraining, setIsTraining] = useState(false);
+  const [trainingHistory, setTrainingHistory] = useState<Array<{round: number; accuracy: number}>>([]);
+  const [estimatedTimePerRound] = useState(30); // seconds per round
 
-  // Use refs for controlling async operations and intervals
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const metricsIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const trainingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const isTrainingRoundActiveRef = useRef<boolean>(false);
-  const sessionRenewalTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  useEffect(() => {
+    initializeSession();
+  }, []);
 
-  // Initialize or renew session
-  const initializeSession = async (renewExisting: boolean = false) => {
+  const initializeSession = async () => {
     try {
-      let session_id;
-      
-      if (renewExisting && sessionId) {
-        // Check if existing session is still valid
-        const response = await fetch(`/api/session/${sessionId}/status`);
-        if (response.ok) {
-          const { valid } = await response.json();
-          if (valid) {
-            session_id = sessionId;
-          }
-        }
+      const response = await fetch('/api/session/new', { method: 'POST' });
+      const data = await response.json();
+      if (data.session_id) {
+        setSessionId(data.session_id);
+      } else {
+        throw new Error('No session ID received');
       }
-      
-      if (!session_id) {
-        // Create new session
-        const response = await fetch('/api/session/new', { method: 'POST' });
-        if (!response.ok) throw new Error('Failed to create session');
-        const data = await response.json();
-        session_id = data.session_id;
-      }
-      
-      // Initialize FL manager with the session
-      const initResponse = await fetch('/api/fl/initialize', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Session-ID': session_id
-        },
-        body: JSON.stringify({
-          num_clients: 3,
-          local_epochs: 1,
-          batch_size: 32,
-          noise_multiplier: 1,
-          l2_norm_clip: 1
-        })
-      });
-
-      if (!initResponse.ok) {
-        throw new Error('Failed to initialize federated learning');
-      }
-
-      setSessionId(session_id);
-      setError(null);
-
-      // Schedule session renewal before timeout
-      if (sessionRenewalTimeoutRef.current) {
-        clearTimeout(sessionRenewalTimeoutRef.current);
-      }
-      sessionRenewalTimeoutRef.current = setTimeout(() => {
-        initializeSession(true);
-      }, 25 * 60 * 1000); // Renew 5 minutes before 30-minute timeout
-      
-      return session_id;
     } catch (err) {
-      console.error('Session initialization failed:', err);
-      setError('Failed to initialize session. Please refresh the page.');
-      setIsTraining(false);
-      throw err;
+      setError('Failed to initialize session');
+      console.error('Session initialization error:', err);
     }
   };
 
-  // Fetch current metrics and state
-  const fetchData = async (): Promise<boolean> => {
-    if (!sessionId || !isTraining) return false;
+  const executeTrainingRound = async () => {
+    if (!sessionId || isTraining) return;
 
     try {
-      const [metricsResponse, stateResponse] = await Promise.all([
-        fetch('/api/fl/metrics', {
-          headers: { 'X-Session-ID': sessionId }
-        }),
-        fetch('/api/fl/current_state', {
-          headers: { 'X-Session-ID': sessionId }
-        })
-      ]);
-
-      // Handle session expiry
-      if (metricsResponse.status === 401 || stateResponse.status === 401) {
-        await initializeSession(true);
-        return false;
-      }
-
-      if (!metricsResponse.ok || !stateResponse.ok) {
-        throw new Error(`Failed to fetch data: ${metricsResponse.status}, ${stateResponse.status}`);
-      }
-
-      const [metricsData, stateData] = await Promise.all([
-        metricsResponse.json(),
-        stateResponse.json()
-      ]);
-
-      setMetrics(metricsData);
-      setCurrentState(stateData);
-      setError(null);
-
-      // Check if training should stop
-      if (stateData.current_round >= stateData.total_rounds || !stateData.training_active) {
-        setIsTraining(false);
-      }
-
-      return true;
-    } catch (err) {
-      console.error('Error fetching data:', err);
-      if (err instanceof Error) setError(err.message);
-      return false;
-    }
-  };
-
-  // Execute training round
-  const trainRound = async (): Promise<void> => {
-    if (!sessionId || isTrainingRoundActiveRef.current || !isTraining) return;
-
-    try {
-      isTrainingRoundActiveRef.current = true;
+      setIsTraining(true);
+      setStatus('Training');
       
+      console.log('Executing training round...');
       const response = await fetch('/api/fl/train_round', {
         method: 'POST',
         headers: {
@@ -204,288 +114,194 @@ const Dashboard: React.FC = () => {
         }
       });
 
-      // Handle session expiry
-      if (response.status === 401) {
-        await initializeSession(true);
-        return;
-      }
-
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Training round failed: ${errorText}`);
+        throw new Error(`Training round failed: ${response.statusText}`);
       }
 
-      const result = await response.json();
+      const data = await response.json();
+      console.log('Training response:', data);
       
-      if (result.status === 'success') {
-        // Wait for backend state to update
-        let retries = 3;
-        while (retries > 0) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          const success = await fetchData();
-          if (success) break;
-          retries--;
-        }
+      if (data.status === 'success' && data.metrics) {
+        const newMetrics: TrainingMetrics = {
+          loss: data.metrics.global_metrics.test_loss ?? 0,
+          accuracy: data.metrics.global_metrics.test_accuracy ?? 0,
+          privacy_budget: {
+            epsilon: data.metrics.privacy_budget.epsilon ?? 0,
+            delta: data.metrics.privacy_budget.delta ?? 0
+          }
+        };
+        setMetrics(newMetrics);
+        setTrainingHistory(prev => [...prev, {
+          round: currentRound + 1,
+          accuracy: newMetrics.accuracy
+        }]);
+        setCurrentRound(prev => prev + 1);
+        setStatus('Complete');
       }
     } catch (err) {
-      console.error('Error in training round:', err);
-      if (err instanceof Error) setError(err.message);
-      setIsTraining(false);
+      setError('Training round failed');
+      setStatus('Failed');
+      console.error('Training error:', err);
     } finally {
-      isTrainingRoundActiveRef.current = false;
+      setIsTraining(false);
     }
   };
 
-  // Initialize session effect
-  useEffect(() => {
-    if (!sessionId) {
-      initializeSession();
+  const handleTrainingStart = useCallback(async () => {
+    try {
+      setTrainingStarted(true);
+      await executeTrainingRound();
+    } catch (err) {
+      setError('Failed to start training');
+      setIsTraining(false);
     }
-
-    return () => {
-      if (sessionRenewalTimeoutRef.current) {
-        clearTimeout(sessionRenewalTimeoutRef.current);
-      }
-    };
-  }, [sessionId]);
-
-  // Training management effect
-  useEffect(() => {
-    if (!isTraining || !sessionId) return;
-
-    const scheduleNextRound = () => {
-      if (trainingTimeoutRef.current) {
-        clearTimeout(trainingTimeoutRef.current);
-      }
-
-      trainingTimeoutRef.current = setTimeout(() => {
-        if (isTraining && !isTrainingRoundActiveRef.current) {
-          trainRound().then(() => {
-            if (isTraining) scheduleNextRound();
-          });
-        }
-      }, 30000); // 30 seconds between rounds
-    };
-
-    // Start first round and schedule next
-    trainRound().then(() => {
-      if (isTraining) scheduleNextRound();
-    });
-
-    return () => {
-      if (trainingTimeoutRef.current) {
-        clearTimeout(trainingTimeoutRef.current);
-      }
-      isTrainingRoundActiveRef.current = false;
-    };
-  }, [isTraining, sessionId]);
-
-  // Metrics polling effect
-  useEffect(() => {
-    if (!isTraining || !sessionId) return;
-
-    const pollMetrics = () => {
-      if (metricsIntervalRef.current) {
-        clearInterval(metricsIntervalRef.current);
-      }
-
-      fetchData();
-      metricsIntervalRef.current = setInterval(fetchData, 10000);
-    };
-
-    pollMetrics();
-
-    return () => {
-      if (metricsIntervalRef.current) {
-        clearInterval(metricsIntervalRef.current);
-      }
-    };
-  }, [isTraining, sessionId]);
-
-  // Component cleanup
-  useEffect(() => {
-    return () => {
-      if (metricsIntervalRef.current) clearInterval(metricsIntervalRef.current);
-      if (trainingTimeoutRef.current) clearTimeout(trainingTimeoutRef.current);
-      if (sessionRenewalTimeoutRef.current) clearTimeout(sessionRenewalTimeoutRef.current);
-      if (abortControllerRef.current) abortControllerRef.current.abort();
-      isTrainingRoundActiveRef.current = false;
-    };
   }, []);
 
-  // Event handlers
-  const handleTutorialComplete = () => {
-    setShowTutorial(false);
-    setShowSetup(true);
+  const getEstimatedTimeRemaining = () => {
+    const remainingRounds = totalRounds - currentRound;
+    const totalSeconds = remainingRounds * estimatedTimePerRound;
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}m ${seconds}s`;
   };
 
-  const handleSetupComplete = () => {
-    setShowSetup(false);
-    setIsTraining(true);
-  };
-
-  if (showTutorial) {
-    return <TutorialOverlay onComplete={handleTutorialComplete} />;
-  }
-
-  if (showSetup) {
-    return <ClientSetup onStart={handleSetupComplete} sessionId={sessionId} />;
-  }
-
-  const getChartData = () => {
-    if (!metrics?.training_history?.training_metrics) return [];
-    return metrics.training_history.training_metrics.map((metric) => ({
-      round: metric.round_number,
-      accuracy: metric.global_metrics.test_accuracy * 100
-    }));
-  };
+  const trainingSteps = [
+    {
+      icon: <Activity className="w-6 h-6" />,
+      title: "Local Training",
+      description: "Each client is training on their private data",
+      active: isTraining && status === 'Training'
+    },
+    {
+      icon: <Lock className="w-6 h-6" />,
+      title: "Privacy Protection",
+      description: "Adding noise to protect individual privacy",
+      active: isTraining && status === 'Training'
+    },
+    {
+      icon: <Zap className="w-6 h-6" />,
+      title: "Model Aggregation",
+      description: "Combining improvements from all clients",
+      active: isTraining && status === 'Training'
+    },
+    {
+      icon: <BarChart className="w-6 h-6" />,
+      title: "Progress Evaluation",
+      description: "Measuring model performance",
+      active: isTraining && status === 'Training'
+    }
+  ];
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100 p-6">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold mb-8 text-purple-400">Federated Learning Dashboard</h1>
+    <div className="min-h-screen bg-gray-900 text-white p-6">
+      {showTutorial && (
+        <TutorialOverlay onComplete={() => setShowTutorial(false)} />
+      )}
 
-        <div className="mb-8">
-          <TrainingStatus 
-            status={currentState?.status || 'Initializing'}
-            error={error}
-            currentRound={currentState?.current_round || 0}
-            totalRounds={currentState?.total_rounds || 10}
-            accuracy={currentState?.latest_accuracy || 0}
-          />
-          <ProgressBar 
-            currentRound={currentState?.current_round || 0}
-            totalRounds={currentState?.total_rounds || 10}
-            status={currentState?.status || 'Initializing'}
-          />
-        </div>
-                
+      <div className="max-w-4xl mx-auto space-y-6">
+        <h1 className="text-2xl font-bold text-purple-400 text-center">
+          Privacy-Preserving Federated Learning Demo
+        </h1>
+
         {error && (
-          <div className="mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400">
-            {error}
+          <div className="mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-2">
+            <AlertCircle className="text-red-400" />
+            <span className="text-red-400">{error}</span>
           </div>
         )}
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <Card className="bg-gray-800 border-purple-500/20">
-            <CardHeader>
-              <CardTitle className="text-purple-400 flex items-center gap-2">
-                <Activity className="w-4 h-4" />
-                Training Status
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold text-green-400">
-                {currentState?.training_active ? 'Active' : 'Inactive'}
-              </p>
-            </CardContent>
-          </Card>
 
-          <Card className="bg-gray-800 border-purple-500/20">
-            <CardHeader>
-              <CardTitle className="text-purple-400 flex items-center gap-2">
-                <Users className="w-4 h-4" />
-                Total Rounds
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold text-green-400">
-                {currentState?.total_rounds || 0}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gray-800 border-purple-500/20">
-            <CardHeader>
-              <CardTitle className="text-purple-400 flex items-center gap-2">
-                <Brain className="w-4 h-4" />
-                Current Round
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold text-green-400">
-                {currentState?.current_round || 0}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gray-800 border-purple-500/20">
-            <CardHeader>
-              <CardTitle className="text-purple-400 flex items-center gap-2">
-                <Shield className="w-4 h-4" />
-                Latest Accuracy
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold text-green-400">
-                {currentState?.latest_accuracy 
-                  ? `${(currentState.latest_accuracy * 100).toFixed(1)}%` 
-                  : 'N/A'}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-
-        <Card className="bg-gray-800 border-purple-500/20 mb-8">
-          <CardHeader>
-            <CardTitle className="text-purple-400">Training Progress</CardTitle>
-          </CardHeader>
-          <CardContent className="h-96">
-            {metrics?.training_history?.training_metrics && (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={getChartData()}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis 
-                    dataKey="round" 
-                    stroke="#9CA3AF"
-                    label={{ value: 'Round', position: 'bottom', fill: '#9CA3AF' }}
-                  />
-                  <YAxis 
-                    stroke="#9CA3AF"
-                    label={{ value: 'Accuracy (%)', angle: -90, position: 'left', fill: '#9CA3AF' }}
-                    domain={[0, 100]}
-                  />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#1F2937', border: 'none' }}
-                    labelStyle={{ color: '#9CA3AF' }}
-                    formatter={(value: number) => [`${value.toFixed(1)}%`, 'Accuracy']}
-                  />
-                  <Legend />
-                  <Line 
-                    type="monotone" 
-                    dataKey="accuracy" 
-                    stroke="#A78BFA" 
-                    strokeWidth={2}
-                    dot={false}
-                    name="Model Accuracy"
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gray-800 border-purple-500/20">
-          <CardHeader>
-            <CardTitle className="text-purple-400">Privacy Settings</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm text-gray-400">Noise Multiplier</p>
-                <p className="text-xl font-bold text-green-400">
-                  {currentState?.privacy_settings.noise_multiplier || 'N/A'}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-400">L2 Norm Clip</p>
-                <p className="text-xl font-bold text-green-400">
-                  {currentState?.privacy_settings.l2_norm_clip || 'N/A'}
-                </p>
-              </div>
+        {!trainingStarted ? (
+          <ClientSetup 
+            onStart={handleTrainingStart}
+            sessionId={sessionId}
+          />
+        ) : (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {trainingSteps.map((step, index) => (
+                <TrainingStep key={index} {...step} />
+              ))}
             </div>
-          </CardContent>
-        </Card>
+
+            <Card className="bg-gray-800 border-purple-500/20">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-purple-400">Training Progress</CardTitle>
+                  <div className="flex items-center text-gray-400 text-sm">
+                    <Clock className="w-4 h-4 mr-2" />
+                    Est. remaining: {getEstimatedTimeRemaining()}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <ProgressBar
+                    currentRound={currentRound}
+                    totalRounds={totalRounds}
+                    status={status}
+                  />
+                  
+                  <div className="grid grid-cols-3 gap-4 text-center">
+                    <div className="bg-gray-700/50 rounded-lg p-3">
+                      <div className="text-gray-400 text-sm">Accuracy</div>
+                      <div className="text-purple-400 text-xl font-bold">
+                        {(metrics.accuracy * 100).toFixed(1)}%
+                      </div>
+                    </div>
+                    <div className="bg-gray-700/50 rounded-lg p-3">
+                      <div className="text-gray-400 text-sm">Privacy Budget (ε)</div>
+                      <div className="text-purple-400 text-xl font-bold">
+                        {metrics.privacy_budget.epsilon.toFixed(3)}
+                      </div>
+                    </div>
+                    <div className="bg-gray-700/50 rounded-lg p-3">
+                      <div className="text-gray-400 text-sm">Round</div>
+                      <div className="text-purple-400 text-xl font-bold">
+                        {currentRound} / {totalRounds}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="h-64 mt-4">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={trainingHistory}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                        <XAxis dataKey="round" stroke="#9CA3AF" />
+                        <YAxis
+                          stroke="#9CA3AF"
+                          domain={[0, 1]}
+                          tickFormatter={(value) => `${(value * 100).toFixed(0)}%`}
+                        />
+                        <Tooltip
+                          contentStyle={{ backgroundColor: '#1F2937', border: 'none' }}
+                          labelStyle={{ color: '#9CA3AF' }}
+                          formatter={(value: number) => `${(value * 100).toFixed(1)}%`}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="accuracy"
+                          stroke="#8B5CF6"
+                          strokeWidth={2}
+                          dot={{ fill: '#8B5CF6' }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  <div className="flex justify-center">
+                    <button
+                      onClick={executeTrainingRound}
+                      disabled={isTraining || currentRound >= totalRounds}
+                      className="px-6 py-2 bg-purple-500 rounded-lg hover:bg-purple-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isTraining ? 'Training...' : 'Run Next Round'}
+                    </button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
       </div>
     </div>
   );
