@@ -13,56 +13,57 @@ interface TutorialStep {
 
 const tutorialSteps: TutorialStep[] = [
   {
-    title: "Welcome to Federated Learning!",
-    content: "Discover how we can train AI models while keeping data private and secure.",
+    title: "Welcome to a Federated Learning Demo!",
+    content: "In this demo, you'll help train an AI system to recognize handwritten numbers (0-9) while keeping all training data private.",
     icon: <Brain className="w-12 h-12 text-purple-400" />,
     details: [
-      "Traditional AI requires centralizing all data in one place",
-      "Federated learning keeps data where it originates",
-      "Learn through collaboration without compromising privacy"
+      "You'll train an AI model to look at images of handwritten numbers and predict what number it sees",
+      "We'll show you how multiple organizations can work together to train AI without sharing their private data",
+      "You'll see the model get better at recognizing numbers with each training round"
     ]
   },
   {
-    title: "Privacy First",
-    content: "Your data stays where it belongs - with you.",
-    icon: <Lock className="w-12 h-12 text-purple-400" />,
-    details: [
-      "Data never leaves its source",
-      "Only model updates are shared",
-      "Perfect for sensitive data like healthcare records or financial information"
-    ]
-  },
-  {
-    title: "How It Works",
-    content: "Understanding the federated learning process step by step.",
-    icon: <Activity className="w-12 h-12 text-purple-400" />,
-    details: [
-      "1. Initial model is distributed to all participants",
-      "2. Each participant trains on their local data",
-      "3. Only model improvements are shared back",
-      "4. A new, improved model is created from all contributions"
-    ]
-  },
-  {
-    title: "Real-World Applications",
-    content: "See how federated learning is transforming industries.",
+    title: "Understanding the Dataset",
+    content: "We're using the MNIST dataset - a collection of thousands of handwritten numbers.",
     icon: <Database className="w-12 h-12 text-purple-400" />,
     details: [
-      "Healthcare: Train on patient data while maintaining privacy",
-      "Mobile Devices: Improve user experience without sharing personal data",
-      "Finance: Detect fraud patterns across institutions",
-      "IoT: Learn from device data while respecting user privacy"
+      "Each client has their own set of handwritten number images",
+      "The model tries to predict what number (0-9) is shown in each image",
+      "Accuracy shows how often the model correctly guesses the right number",
+      "For example, 90% accuracy means it correctly identifies 9 out of 10 numbers"
     ]
   },
   {
-    title: "Your Turn!",
-    content: "Experience federated learning in action through this interactive demo.",
+    title: "How Training Works",
+    content: "You'll need to run multiple training rounds to improve the model's accuracy.",
+    icon: <Activity className="w-12 h-12 text-purple-400" />,
+    details: [
+      "Each round: Clients use their private images to teach the model",
+      "The model makes predictions, checks if it's right or wrong, and learns from its mistakes",
+      "Only the lessons learned are shared, never the actual images",
+      "With each round, the model should get better at recognizing numbers"
+    ]
+  },
+  {
+    title: "Privacy Protection",
+    content: "Your data stays private while still helping to train the AI.",
+    icon: <Lock className="w-12 h-12 text-purple-400" />,
+    details: [
+      "Think of it like a study group where students share their insights, not their notes",
+      "Each client keeps their number images private and local",
+      "Only the model's learning progress is shared",
+      "Random noise is added to further protect privacy"
+    ]
+  },
+  {
+    title: "Let's Get Started!",
+    content: "First, you'll set up multiple clients to participate in training.",
     icon: <Users className="w-12 h-12 text-purple-400" />,
     details: [
-      "Configure multiple clients with different data distributions",
-      "Watch the model improve through collaborative learning",
-      "Monitor privacy metrics in real-time",
-      "See how accuracy improves without sharing raw data"
+      "Add at least 2 clients to begin training (more clients = better results)",
+      "Each client will have their own set of number images to train with",
+      "You'll run multiple training rounds to improve accuracy",
+      "Watch the accuracy increase as the model learns to recognize numbers better!"
     ]
   }
 ];

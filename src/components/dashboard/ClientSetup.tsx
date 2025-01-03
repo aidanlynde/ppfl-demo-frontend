@@ -18,7 +18,7 @@ interface Client {
 
 const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
   const [clients, setClients] = useState<Client[]>([
-    { id: 1, dataSize: 1000, dataDistribution: 'normal' }
+    { id: 1, dataSize: 800, dataDistribution: 'normal' }
   ]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -26,14 +26,14 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
 
   const addClient = useCallback((): void => {
     if (clients.length < 5) {
-      const totalDataSize = clients.reduce((sum, client) => sum + client.dataSize, 0) + 1000;
+      const totalDataSize = clients.reduce((sum, client) => sum + client.dataSize, 0) + 800;
       if (totalDataSize > 6000) {
         setError('Warning: Adding more clients would exceed recommended total data size');
         return;
       }
       setClients(prev => [...prev, {
         id: prev.length + 1,
-        dataSize: 1000,
+        dataSize: 800,
         dataDistribution: 'normal'
       }]);
     }
@@ -107,7 +107,6 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
     } catch (error) {
       console.error('Error:', error);
       
-      // Increment attempt counter and handle retries
       setInitializationAttempts(prev => {
         const newCount = prev + 1;
         if (newCount >= 3) {
@@ -121,6 +120,8 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
       setIsLoading(false);
     }
   };
+
+  const isStartDisabled = isLoading || !sessionId || initializationAttempts >= 3 || clients.length <= 1;
 
   return (
     <div className="max-w-4xl mx-auto p-6">
@@ -201,18 +202,25 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
                 <span>Add Client</span>
               </button>
 
-              <button
-                onClick={handleStart}
-                disabled={isLoading || !sessionId || initializationAttempts >= 3}
-                className={`flex items-center space-x-2 px-6 py-2 rounded bg-purple-500 hover:bg-purple-400 ${
-                  (isLoading || !sessionId || initializationAttempts >= 3) ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
-              >
-                <Play className="w-5 h-5" />
-                <span>
-                  {isLoading ? 'Starting...' : 'Start Training'}
-                </span>
-              </button>
+              <div className="relative group">
+                <button
+                  onClick={handleStart}
+                  disabled={isStartDisabled}
+                  className={`flex items-center space-x-2 px-6 py-2 rounded bg-purple-500 hover:bg-purple-400 ${
+                    isStartDisabled ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
+                >
+                  <Play className="w-5 h-5" />
+                  <span>
+                    {isLoading ? 'Starting...' : 'Start Training'}
+                  </span>
+                </button>
+                {clients.length <= 1 && (
+                  <div className="absolute invisible group-hover:visible w-64 bg-gray-800 text-sm p-2 rounded-lg shadow-lg -top-12 right-0 text-gray-300">
+                    Please add more clients to begin training. Federated learning requires multiple clients to be effective.
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </CardContent>
