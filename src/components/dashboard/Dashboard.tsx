@@ -6,7 +6,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import ClientSetup from './ClientSetup';
 import ProgressBar from './ProgressBar';
 import TutorialOverlay from './TutorialOverlay';
-import { AlertCircle, Clock, Activity, Lock, Zap, BarChart } from 'lucide-react';
+import { AlertCircle, Clock, Activity, Lock, Zap, BarChart, Info } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface TrainingMetrics {
@@ -199,9 +199,6 @@ const Dashboard: React.FC = () => {
       )}
 
       <div className="max-w-4xl mx-auto space-y-6">
-        <h1 className="text-2xl font-bold text-purple-400 text-center">
-          Privacy-Preserving Federated Learning Demo
-        </h1>
 
         {error && (
           <div className="mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-2">
@@ -217,19 +214,72 @@ const Dashboard: React.FC = () => {
           />
         ) : (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {trainingSteps.map((step, index) => (
-                <TrainingStep key={index} {...step} />
-              ))}
-            </div>
+            <Card className="bg-gray-800 border-purple-500/20">
+              <CardHeader>
+                <h2 className="text-2xl font-semibold text-purple-400 mb-0">Training Process</h2>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[
+                    {
+                      icon: <Activity className="w-6 h-6" />,
+                      title: "Local Training",
+                      description: isTraining ? "Each client is training on their private data" : "Each client will train on their private data",
+                      active: isTraining && status === 'Training'
+                    },
+                    {
+                      icon: <Lock className="w-6 h-6" />,
+                      title: "Privacy Protection",
+                      description: isTraining ? "Adding noise to protect individual privacy" : "Noise will be added to protect individual privacy",
+                      active: isTraining && status === 'Training'
+                    },
+                    {
+                      icon: <Zap className="w-6 h-6" />,
+                      title: "Model Aggregation",
+                      description: isTraining ? "Combining improvements from all clients" : "Improvements from all clients will be combined",
+                      active: isTraining && status === 'Training'
+                    },
+                    {
+                      icon: <BarChart className="w-6 h-6" />,
+                      title: "Progress Evaluation",
+                      description: isTraining ? "Measuring model performance" : "Model performance will be measured",
+                      active: isTraining && status === 'Training'
+                    }
+                  ].map((step, index) => (
+                    <TrainingStep key={index} {...step} />
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
 
             <Card className="bg-gray-800 border-purple-500/20">
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-purple-400">Training Progress</CardTitle>
-                  <div className="flex items-center text-gray-400 text-sm">
-                    <Clock className="w-4 h-4 mr-2" />
-                    Est. remaining: {getEstimatedTimeRemaining()}
+                  <div className="flex-1">
+                    <CardTitle className="text-2xl text-purple-400">Metrics Dashboard</CardTitle>
+                  </div>
+                  <div className="flex items-center space-x-4">
+                    <div className="flex items-center text-gray-400 text-sm">
+                      <Clock className="w-4 h-4 mr-2" />
+                      Est. remaining: {getEstimatedTimeRemaining()}
+                    </div>
+                    <div className="relative group">
+                      <button
+                        onClick={executeTrainingRound}
+                        disabled={isTraining || currentRound >= totalRounds}
+                        className="px-6 py-2 bg-purple-500 rounded-lg hover:bg-purple-400 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      >
+                        {isTraining ? 'Training...' : 
+                         currentRound === 0 ? 'Run First Round' :
+                         currentRound === totalRounds - 1 ? 'Run Last Round' :
+                         'Run Next Round'}
+                        <Info className="w-4 h-4" />
+                      </button>
+                      <div className="absolute invisible group-hover:visible w-64 bg-gray-800 text-xs p-2 rounded-lg shadow-lg -top-24 left-1/2 transform -translate-x-1/2">
+                        Each training round improves the model by learning from all clients while keeping their data private.
+                        More rounds generally lead to better accuracy while maintaining privacy.
+                      </div>
+                    </div>
                   </div>
                 </div>
               </CardHeader>
@@ -241,17 +291,39 @@ const Dashboard: React.FC = () => {
                     status={status}
                   />
                   
-                  <div className="grid grid-cols-3 gap-4 text-center">
-                    <div className="bg-gray-700/50 rounded-lg p-3">
-                      <div className="text-gray-400 text-sm">Accuracy</div>
-                      <div className="text-purple-400 text-xl font-bold">
+                  <div className="grid grid-cols-3 gap-4 text-center mt-4">
+                    <div className="bg-gray-700/50 rounded-lg p-3 group relative">
+                      <div className="text-gray-400 text-sm flex items-center justify-center gap-1">
+                        Accuracy
+                        <div className="absolute invisible group-hover:visible w-64 bg-gray-800 text-xs p-2 rounded-lg shadow-lg -top-24 left-1/2 transform -translate-x-1/2">
+                          Model accuracy shows how well the model performs at recognizing handwritten digits.
+                          Higher accuracy means better performance, with 100% being perfect recognition.
+                        </div>
+                      </div>
+                      <div className="text-purple-400 text-xl font-bold flex items-center justify-center gap-2">
                         {(metrics.accuracy * 100).toFixed(1)}%
+                        <div className={`h-2 w-2 rounded-full ${
+                          metrics.accuracy > 0.9 ? 'bg-green-400' : 
+                          metrics.accuracy > 0.7 ? 'bg-yellow-400' : 
+                          'bg-red-400'
+                        }`} />
                       </div>
                     </div>
-                    <div className="bg-gray-700/50 rounded-lg p-3">
-                      <div className="text-gray-400 text-sm">Privacy Budget (ε)</div>
-                      <div className="text-purple-400 text-xl font-bold">
+                    <div className="bg-gray-700/50 rounded-lg p-3 group relative">
+                      <div className="text-gray-400 text-sm flex items-center justify-center gap-1">
+                        Privacy Budget (ε)
+                        <div className="absolute invisible group-hover:visible w-64 bg-gray-800 text-xs p-2 rounded-lg shadow-lg -top-24 left-1/2 transform -translate-x-1/2">
+                          Privacy budget measures how much information we allow to be revealed during training.
+                          Lower values (closer to 0) mean stronger privacy protection.
+                        </div>
+                      </div>
+                      <div className="text-purple-400 text-xl font-bold flex items-center justify-center gap-2">
                         {metrics.privacy_budget.epsilon.toFixed(3)}
+                        <div className={`h-2 w-2 rounded-full ${
+                          metrics.privacy_budget.epsilon < 3 ? 'bg-green-400' : 
+                          metrics.privacy_budget.epsilon < 7 ? 'bg-yellow-400' : 
+                          'bg-red-400'
+                        }`} />
                       </div>
                     </div>
                     <div className="bg-gray-700/50 rounded-lg p-3">
@@ -286,16 +358,6 @@ const Dashboard: React.FC = () => {
                         />
                       </LineChart>
                     </ResponsiveContainer>
-                  </div>
-
-                  <div className="flex justify-center">
-                    <button
-                      onClick={executeTrainingRound}
-                      disabled={isTraining || currentRound >= totalRounds}
-                      className="px-6 py-2 bg-purple-500 rounded-lg hover:bg-purple-400 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isTraining ? 'Training...' : 'Run Next Round'}
-                    </button>
                   </div>
                 </div>
               </CardContent>

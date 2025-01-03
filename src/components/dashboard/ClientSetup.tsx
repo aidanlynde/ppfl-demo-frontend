@@ -157,7 +157,7 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
                     <Slider
                       value={[client.dataSize]}
                       min={100}
-                      max={2000}
+                      max={1500}
                       step={100}
                       className="mt-2"
                       disabled={isLoading}
