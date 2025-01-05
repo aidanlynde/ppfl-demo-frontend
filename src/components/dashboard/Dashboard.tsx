@@ -261,7 +261,7 @@ const Dashboard: React.FC = () => {
                   <div className="flex items-center space-x-4">
                     <div className="flex items-center text-gray-400 text-sm">
                       <Clock className="w-4 h-4 mr-2" />
-                      Est. remaining: {getEstimatedTimeRemaining()}
+                      ~1:30 per round
                     </div>
                     <div className="relative group">
                       <button
@@ -284,7 +284,7 @@ const Dashboard: React.FC = () => {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
+                <div className="space-y-10">
                   <ProgressBar
                     currentRound={currentRound}
                     totalRounds={totalRounds}

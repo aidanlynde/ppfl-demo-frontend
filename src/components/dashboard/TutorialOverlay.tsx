@@ -13,7 +13,7 @@ interface TutorialStep {
 
 const tutorialSteps: TutorialStep[] = [
   {
-    title: "Welcome to a Federated Learning Demo!",
+    title: "Welcome to Federated Learning!",
     content: "In this demo, you'll help train an AI system to recognize handwritten numbers (0-9) while keeping all training data private.",
     icon: <Brain className="w-12 h-12 text-purple-400" />,
     details: [
