@@ -22,8 +22,6 @@ interface TrainingVisualizationProps {
 
 const TrainingVisualization: React.FC<TrainingVisualizationProps> = ({
   metricsHistory,
-  currentRound,
-  totalRounds
 }) => {
   const tooltipContent = {
     accuracy: "Model accuracy shows how well the model performs across all clients without sharing raw data.",

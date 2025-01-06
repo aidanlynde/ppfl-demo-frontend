@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { ChevronRight, ChevronLeft, Lock, Brain, Users, ShieldCheck, Database, Activity } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Lock, Brain, Users, Database, Activity } from 'lucide-react';
 
 interface TutorialOverlayProps {
  onComplete: () => void;

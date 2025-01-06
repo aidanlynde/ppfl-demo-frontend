@@ -2,7 +2,6 @@ import React, { useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Slider } from '@/components/ui/slider';
 import { Plus, Minus, Play, Shield } from 'lucide-react';
-import { Tooltip } from 'recharts';
 
 interface ClientSetupProps {
   onStart: () => void;

@@ -18,12 +18,6 @@ interface TrainingMetrics {
   };
 }
 
-interface StateResponse {
-  status: string;
-  current_round: number;
-  training_active: boolean;
-  latest_accuracy: number;
-}
 
 // Training step animation component
 const TrainingStep: React.FC<{
@@ -77,7 +71,7 @@ const Dashboard: React.FC = () => {
   });
   const [isTraining, setIsTraining] = useState(false);
   const [trainingHistory, setTrainingHistory] = useState<Array<{round: number; accuracy: number}>>([]);
-  const [estimatedTimePerRound] = useState(30); // seconds per round
+  
 
   useEffect(() => {
     initializeSession();
@@ -156,41 +150,6 @@ const Dashboard: React.FC = () => {
       setIsTraining(false);
     }
   }, []);
-
-  const getEstimatedTimeRemaining = () => {
-    const remainingRounds = totalRounds - currentRound;
-    const totalSeconds = remainingRounds * estimatedTimePerRound;
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return `${minutes}m ${seconds}s`;
-  };
-
-  const trainingSteps = [
-    {
-      icon: <Activity className="w-2 h-2 sm:w-4 sm:h-4 md:w-6 md:h-6" />,
-      title: "Local Training",
-      description: isTraining ? "Each client is training on their private data" : "Each client will train on their private data",
-      active: isTraining && status === 'Training'
-    },
-    {
-      icon: <Lock className="w-2 h-2 sm:w-4 sm:h-4 md:w-6 md:h-6" />,
-      title: "Privacy Protection",
-      description: isTraining ? "Adding noise to protect individual privacy" : "Noise will be added to protect individual privacy",
-      active: isTraining && status === 'Training'
-    },
-    {
-      icon: <Zap className="w-2 h-2 sm:w-4 sm:h-4 md:w-6 md:h-6" />,
-      title: "Model Aggregation",
-      description: isTraining ? "Combining improvements from all clients" : "Improvements from all clients will be combined",
-      active: isTraining && status === 'Training'
-    },
-    {
-      icon: <BarChart className="w-2 h-2 sm:w-4 sm:h-4 md:w-6 md:h-6" />,
-      title: "Progress Evaluation",
-      description: isTraining ? "Measuring model performance" : "Model performance will be measured",
-      active: isTraining && status === 'Training'
-    }
-  ];
 
   const handleReconfigure = async () => {
     if (!sessionId) {
