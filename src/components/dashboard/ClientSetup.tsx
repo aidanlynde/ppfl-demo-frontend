@@ -1,9 +1,8 @@
-"use client";
-
 import React, { useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Slider } from '@/components/ui/slider';
-import { Plus, Minus, Play } from 'lucide-react';
+import { Plus, Minus, Play, Shield } from 'lucide-react';
+import { Tooltip } from 'recharts';
 
 interface ClientSetupProps {
   onStart: () => void;
@@ -16,10 +15,19 @@ interface Client {
   dataDistribution: string;
 }
 
+interface PrivacyConfig {
+  noiseMultiplier: number;
+  l2NormClip: number;
+}
+
 const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
   const [clients, setClients] = useState<Client[]>([
     { id: 1, dataSize: 800, dataDistribution: 'normal' }
   ]);
+  const [privacyConfig, setPrivacyConfig] = useState<PrivacyConfig>({
+    noiseMultiplier: 1.0,
+    l2NormClip: 1.0
+  });
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [initializationAttempts, setInitializationAttempts] = useState(0);
@@ -68,8 +76,8 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
         num_clients: clients.length,
         local_epochs: 1,
         batch_size: 32,
-        noise_multiplier: 1.0,
-        l2_norm_clip: 1.0
+        noise_multiplier: privacyConfig.noiseMultiplier,
+        l2_norm_clip: privacyConfig.l2NormClip
       };
 
       console.log('Request data:', initializeData);
@@ -133,10 +141,73 @@ const ClientSetup: React.FC<ClientSetupProps> = ({ onStart, sessionId }) => {
 
       <Card className="bg-gray-800 border-purple-500/20">
         <CardHeader>
-          <CardTitle className="text-purple-400">Configure Your Clients</CardTitle>
+          <CardTitle className="text-purple-400">Configure Training</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-6">
+            {/* Privacy Settings Section */}
+            <div className="bg-gray-700/50 p-4 rounded-lg space-y-4">
+              <div className="flex items-center space-x-2">
+                <Shield className="w-5 h-5 text-purple-400" />
+                <h3 className="text-lg font-medium text-purple-300">Privacy Settings</h3>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <div className="group relative">
+                    <label className="text-sm text-gray-300 flex items-center space-x-2">
+                      <span>Noise Multiplier</span>
+                    </label>
+                    <div className="absolute invisible group-hover:visible w-64 bg-gray-800 text-sm p-2 rounded-lg shadow-lg -top-16 right-0 text-gray-300">
+                      Higher values provide stronger privacy but may reduce model accuracy
+                    </div>
+                  </div>
+                  <Slider
+                    value={[privacyConfig.noiseMultiplier]}
+                    min={0.1}
+                    max={2.0}
+                    step={0.1}
+                    className="mt-2"
+                    disabled={isLoading}
+                    onValueChange={(value) => {
+                      setPrivacyConfig(prev => ({
+                        ...prev,
+                        noiseMultiplier: value[0]
+                      }));
+                    }}
+                  />
+                  <span className="text-sm text-gray-400">{privacyConfig.noiseMultiplier.toFixed(1)}</span>
+                </div>
+
+                <div>
+                  <div className="group relative">
+                    <label className="text-sm text-gray-300 flex items-center space-x-2">
+                      <span>L2 Norm Clip</span>
+                    </label>
+                    <div className="absolute invisible group-hover:visible w-64 bg-gray-800 text-sm p-2 rounded-lg shadow-lg -top-20 right-0 text-gray-300">
+                      Limits the influence of individual client results on the global model. Lower values mean stronger privacy.
+                    </div>
+                  </div>
+                  <Slider
+                    value={[privacyConfig.l2NormClip]}
+                    min={0.1}
+                    max={2.0}
+                    step={0.1}
+                    className="mt-2"
+                    disabled={isLoading}
+                    onValueChange={(value) => {
+                      setPrivacyConfig(prev => ({
+                        ...prev,
+                        l2NormClip: value[0]
+                      }));
+                    }}
+                  />
+                  <span className="text-sm text-gray-400">{privacyConfig.l2NormClip.toFixed(1)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Client Configuration Section */}
             {clients.map((client) => (
               <div key={client.id} className="bg-gray-700 p-4 rounded-lg">
                 <div className="flex justify-between items-center mb-4">

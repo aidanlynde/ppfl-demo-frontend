@@ -192,6 +192,64 @@ const Dashboard: React.FC = () => {
     }
   ];
 
+  const handleReconfigure = async () => {
+    if (!sessionId) {
+      setError('No active session');
+      return;
+    }
+    
+    try {
+      setIsTraining(true); // Prevent multiple clicks
+      console.log('Attempting reset with session ID:', sessionId);
+      
+      // Force no-cache on the request
+      const response = await fetch('/api/fl/reset', {
+        method: 'POST',
+        headers: {
+          'X-Session-ID': sessionId,
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        },
+        body: JSON.stringify({}),
+        cache: 'no-store'
+      });
+
+      console.log('Reset response received:', response.status);
+
+      const data = await response.json();
+      console.log('Reset response data:', data);
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to reset training');
+      }
+
+      // Reset all local state immediately
+      setTrainingStarted(false);
+      setCurrentRound(0);
+      setStatus('Not started');
+      setMetrics({
+        loss: 0,
+        accuracy: 0,
+        privacy_budget: {
+          epsilon: 0,
+          delta: 0
+        }
+      });
+      setTrainingHistory([]);
+      setError(null);
+      
+      // Force an immediate render cycle
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+    } catch (err) {
+      console.error('Error during reset:', err);
+      setError(err instanceof Error ? err.message : 'Failed to reset training');
+    } finally {
+      setIsTraining(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-900 text-white p-6">
       {showTutorial && (
@@ -216,7 +274,16 @@ const Dashboard: React.FC = () => {
           <div className="space-y-6">
             <Card className="bg-gray-800 border-purple-500/20">
               <CardHeader>
-                <h2 className="text-2xl font-semibold text-purple-400 mb-0">Training Process</h2>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-2xl font-semibold text-purple-400 mb-0">Training Process</h2>
+                  <button
+                    onClick={handleReconfigure}
+                    disabled={isTraining}
+                    className="px-4 py-2 bg-red-500 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white transition-colors flex items-center gap-2"
+                  >
+                    Reconfigure
+                  </button>
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
