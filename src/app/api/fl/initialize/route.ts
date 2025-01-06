@@ -1,7 +1,7 @@
 // src/app/api/fl/initialize/route.ts
 import { NextResponse } from 'next/server';
 
-export const maxDuration = 300;
+export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 interface InitializeData {
